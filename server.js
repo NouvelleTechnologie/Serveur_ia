@@ -22,6 +22,7 @@ const originesDefaut = [
   'https://nouvelletechnologie.github.io',
   'https://digicom-togo-admin.onrender.com',
   'https://serveur-ia-cx4f.onrender.com/',
+  'https://serveur-ia-tlzx.onrender.com',
   'http://localhost:5173',
   'http://localhost:3000'
 ];
