@@ -9,21 +9,23 @@ import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 const app = express();
 const port = Number(process.env.PORT || 10000);
 const PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'digicom-togo-6d3ea';
+// Firestore : la base par défaut s'appelle "(default)" avec parenthèses
 const FIRESTORE_DATABASE_ID = process.env.FIRESTORE_DATABASE_ID || '(default)';
 
+// --- CORS : GitHub Pages ---
 function normaliserOrigine(value) {
   try { return new URL(value).origin; } catch { return ''; }
 }
 const originesEnv = (process.env.FRONTEND_ORIGIN || '')
-  .split(',').map((value) => normaliserOrigine(value.trim())).filter(Boolean);
+  .split(',').map((v) => normaliserOrigine(v.trim())).filter(Boolean);
 const originesDefaut = [
   'https://nouvelletechnologie.github.io',
-  'https://serveur-ia3-wnw4.onrender.com',
   'http://localhost:5173',
   'http://localhost:3000'
 ];
 const originesAutorisees = new Set(originesEnv.length ? originesEnv : originesDefaut);
-const corsOptions = {
+
+app.use(cors({
   origin(origin, callback) {
     if (!origin || originesAutorisees.has(normaliserOrigine(origin))) return callback(null, true);
     return callback(null, false);
@@ -32,73 +34,49 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: false,
   maxAge: 86400
-};
-app.use(cors(corsOptions));
+}));
 app.use(express.json({ limit: '22mb' }));
 app.disable('x-powered-by');
 
-// Firebase Admin - version tolérante au copier-coller téléphone
-let adminApp = null;
+// --- Firebase Admin ---
 let adminAuth = null;
 let adminDb = null;
-
-function parserServiceAccount(raw) {
-  let text = (raw || '').trim();
-  if (!text) return null;
-  // Si Render a ajouté des guillemets autour de tout le JSON
-  if (text.startsWith('"') && text.endsWith('"')) {
-    try { text = JSON.parse(text); } catch {}
-  }
-  // Répare les vrais retours à la ligne dans private_key
-  const fixed = text.replace(/"private_key":\s*"([\s\S]*?)"/, (m, k) => {
-    return '"private_key":"' + k.replace(/\r/g, '').replace(/\n/g, '\\n') + '"';
-  });
-  const account = JSON.parse(fixed);
-  if (account.private_key) account.private_key = account.private_key.replace(/\\n/g, '\n');
-  return account;
-}
-
 try {
-  let account = null;
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    account = parserServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-  } else if (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
-    account = {
-      project_id: PROJECT_ID,
-      client_email: process.env.FIREBASE_CLIENT_EMAIL,
-      private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-    };
-  }
-  if (account) {
-    adminApp = getAdminApps().find((item) => item.name === 'digicom-admin')
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (raw) {
+    const account = JSON.parse(raw);
+    if (account.private_key) account.private_key = account.private_key.replace(/\\n/g, '\n');
+    const adminApp = getAdminApps().find((i) => i.name === 'digicom-admin')
       || initializeAdminApp({ credential: cert(account), projectId: PROJECT_ID }, 'digicom-admin');
     adminAuth = getAdminAuth(adminApp);
     adminDb = FIRESTORE_DATABASE_ID === '(default)'
       ? getAdminFirestore(adminApp)
       : getAdminFirestore(adminApp, FIRESTORE_DATABASE_ID);
-    console.log('Firebase Admin OK');
+    console.log('Firebase Admin OK - base:', FIRESTORE_DATABASE_ID);
   } else {
-    console.log('Firebase Admin : aucune clé trouvée');
+    console.log('Firebase Admin NON configure : FIREBASE_SERVICE_ACCOUNT_JSON manquant');
   }
-} catch (error) {
-  console.error('Firebase Admin non initialisé :', error?.message || error);
+} catch (e) {
+  console.error('Firebase Admin non initialise :', e?.message || e);
 }
 
 const client = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
+if (!client) console.log('OpenAI NON configure : OPENAI_API_KEY manquant');
+else console.log('OpenAI OK');
 
 function dateMillis(value) {
   if (!value) return 0;
   if (typeof value.toMillis === 'function') return value.toMillis();
   if (typeof value.toDate === 'function') return value.toDate().getTime();
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? 0 : d.getTime();
 }
 
 async function verifierAbonne(req, res, next) {
   if (!adminAuth || !adminDb) {
-    return res.status(503).json({ error: "L'authentification sécurisée du serveur IA n'est pas configurée sur Render (FIREBASE_SERVICE_ACCOUNT_JSON)." });
+    return res.status(503).json({ error: "Serveur IA non configure sur Render (FIREBASE_SERVICE_ACCOUNT_JSON)." });
   }
   const authorization = req.get('authorization') || '';
   const token = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
@@ -109,19 +87,19 @@ async function verifierAbonne(req, res, next) {
     if (!profileSnap.exists) return res.status(403).json({ error: 'Profil DigiCom introuvable.' });
     const profile = profileSnap.data();
     if (profile.role !== 'abonne' || profile.actif === false) {
-      return res.status(403).json({ error: "Cette fonction IA est réservée aux vendeurs abonnés actifs." });
+      return res.status(403).json({ error: "Fonction IA reservee aux vendeurs abonnes actifs." });
     }
     const aboSnap = await adminDb.collection('abonnements').doc(decoded.uid).get();
-    if (!aboSnap.exists) return res.status(403).json({ error: "Aucun abonnement vendeur n'est enregistré." });
+    if (!aboSnap.exists) return res.status(403).json({ error: "Aucun abonnement vendeur n'est enregistre." });
     const abo = aboSnap.data();
     if (abo.actif === false || dateMillis(abo.dateFin) <= Date.now()) {
-      return res.status(403).json({ error: 'Ton abonnement DigiCom est expiré ou inactif.' });
+      return res.status(403).json({ error: 'Ton abonnement DigiCom est expire ou inactif.' });
     }
     req.digicomUser = { uid: decoded.uid, nom: profile.nom || profile.email || 'Vendeur' };
     return next();
-  } catch (error) {
-    console.error('Vérification Firebase du token :', error?.message || error);
-    return res.status(401).json({ error: 'Session DigiCom invalide ou expirée. Déconnecte-toi puis reconnecte-toi.' });
+  } catch (e) {
+    console.error('Verification token :', e?.message || e);
+    return res.status(401).json({ error: 'Session DigiCom invalide ou expiree. Deconnecte-toi puis reconnecte-toi.' });
   }
 }
 
@@ -136,7 +114,7 @@ function limiterIA(maximum, fenetreMs = 10 * 60 * 1000) {
       return next();
     }
     if (ancien.nombre >= maximum) {
-      return res.status(429).json({ error: 'Limite temporaire atteinte. Réessaie dans quelques minutes.' });
+      return res.status(429).json({ error: 'Limite temporaire atteinte. Reessaie dans quelques minutes.' });
     }
     ancien.nombre += 1;
     return next();
@@ -156,31 +134,31 @@ app.get('/api/health', (_req, res) => {
 
 app.post('/api/generate-description', verifierAbonne, limiterIA(20), async (req, res) => {
   try {
-    if (!client) return res.status(503).json({ error: "La clé OPENAI_API_KEY n'est pas configurée sur Render." });
+    if (!client) return res.status(503).json({ error: "OPENAI_API_KEY non configuree sur Render." });
     const { nom, prix, categorie, details } = req.body || {};
     if (typeof nom !== 'string' || nom.trim().length < 2 || nom.trim().length > 120) {
-      return res.status(400).json({ error: 'Le nom du produit doit contenir de 2 à 120 caractères.' });
+      return res.status(400).json({ error: 'Le nom du produit doit contenir de 2 a 120 caracteres.' });
     }
     if (details != null && (typeof details !== 'string' || details.length > 1200)) {
-      return res.status(400).json({ error: 'Les détails sont trop longs (maximum 1 200 caractères).' });
+      return res.status(400).json({ error: 'Details trop longs (max 1200 caracteres).' });
     }
     const result = await client.responses.create({
       model: process.env.OPENAI_TEXT_MODEL || 'gpt-4.1-mini',
-      instructions: 'Rédige en français une description de produit pour une marketplace locale au Togo, environ 40 à 90 mots. Sois clair et attractif sans inventer de marque, qualité certifiée, origine, garantie, ingrédients, dimensions, stock, propriétés médicales ou caractéristiques non fournies. Ne modifie pas le prix. Retourne uniquement la description.',
-      input: `Nom : ${nom.trim()}\nPrix indiqué : ${String(prix ?? 'non précisé').slice(0, 40)}\nCatégorie : ${String(categorie ?? 'non précisée').slice(0, 100)}\nDétails confirmés : ${String(details ?? 'aucun').slice(0, 1200)}`
+      instructions: 'Redige en francais une description de produit pour une marketplace locale au Togo, environ 40 a 90 mots. Sois clair et attractif sans inventer de marque, qualite certifiee, origine, garantie, ingredients, dimensions, stock, proprietes medicales ou caracteristiques non fournies. Ne modifie pas le prix. Retourne uniquement la description.',
+      input: `Nom : ${nom.trim()}\nPrix indique : ${String(prix ?? 'non precise').slice(0, 40)}\nCategorie : ${String(categorie ?? 'non precisee').slice(0, 100)}\nDetails confirmes : ${String(details ?? 'aucun').slice(0, 1200)}`
     });
     const description = (result.output_text || '').trim();
-    if (!description) return res.status(502).json({ error: 'Aucune description retournée. Réessaie.' });
+    if (!description) return res.status(502).json({ error: 'Aucune description retournee. Reessaie.' });
     return res.json({ description });
-  } catch (error) {
-    console.error('generate-description:', error?.status || '', error?.message || error);
-    return res.status(502).json({ error: "Le moteur de description IA n'a pas pu traiter la demande. Vérifie la clé API et les crédits OpenAI sur le serveur." });
+  } catch (e) {
+    console.error('generate-description:', e?.status || '', e?.message || e);
+    return res.status(502).json({ error: "Le moteur de description IA n'a pas pu traiter la demande. Verifie la cle API et les credits OpenAI." });
   }
 });
 
 app.post('/api/improve-image', verifierAbonne, limiterIA(5), async (req, res) => {
   try {
-    if (!client) return res.status(503).json({ error: "La clé OPENAI_API_KEY n'est pas configurée sur Render." });
+    if (!client) return res.status(503).json({ error: "OPENAI_API_KEY non configuree sur Render." });
     const { imageDataUrl, prompt } = req.body || {};
     const match = typeof imageDataUrl === 'string'
       ? imageDataUrl.match(/^data:image\/(png|jpeg|jpg|webp);base64,([\s\S]+)$/i)
@@ -198,16 +176,16 @@ app.post('/api/improve-image', verifierAbonne, limiterIA(5), async (req, res) =>
       image: imageFile,
       prompt: (typeof prompt === 'string' && prompt.trim()
         ? prompt.trim()
-        : 'Améliore uniquement la lumière, le cadrage et la netteté de la photo du produit. Préserve fidèlement le produit réel, sa forme, sa couleur, son logo et tous ses détails. N’ajoute et ne retire aucun élément.')
+        : 'Ameliore uniquement la lumiere, le cadrage et la nettete de la photo du produit. Preserve fidelement le produit reel, sa forme, sa couleur, son logo et tous ses details. N’ajoute et ne retire aucun element.')
         .slice(0, 2000),
       size: '1024x1024'
     });
     const base64 = imageResponse.data?.[0]?.b64_json;
-    if (!base64) return res.status(502).json({ error: "Aucune image améliorée n'a été retournée par le moteur IA." });
+    if (!base64) return res.status(502).json({ error: "Aucune image amelioree retournee." });
     return res.json({ imageDataUrl: `data:image/png;base64,${base64}` });
-  } catch (error) {
-    console.error('improve-image:', error?.status || '', error?.message || error);
-    return res.status(502).json({ error: "Le moteur d'image IA n'a pas pu traiter cette photo. Vérifie la clé API, les crédits et le modèle configuré sur Render." });
+  } catch (e) {
+    console.error('improve-image:', e?.status || '', e?.message || e);
+    return res.status(502).json({ error: "Le moteur d'image IA n'a pas pu traiter cette photo. Verifie la cle API, les credits et le modele." });
   }
 });
 
@@ -217,4 +195,4 @@ app.use((error, _req, res, _next) => {
   return res.status(500).json({ error: 'Erreur interne du serveur DigiCom IA.' });
 });
 
-app.listen(port, '0.0.0.0', () => console.log(`DigiCom AI écoute sur le port ${port}`));
+app.listen(port, '0.0.0.0', () => console.log(`DigiCom AI ecoute sur le port ${port}`));
