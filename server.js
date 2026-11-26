@@ -99,18 +99,18 @@ const imageModelEnv = (process.env.GEMINI_IMAGE_MODEL || '').trim();
 
 const GEMINI_TEXT_MODEL = textModelEnv.startsWith('gemini-')
   ? textModelEnv
-  : 'gemini-2.5-flash';
+  : 'gemini-3.8-flash';
 
 const GEMINI_IMAGE_MODEL = imageModelEnv.startsWith('gemini-')
   ? imageModelEnv
-  : 'gemini-2.5-flash-image';
+  : 'gemini-3.8-flash-image';
 
 if (textModelEnv && textModelEnv !== GEMINI_TEXT_MODEL) {
-  console.warn('Modèle texte invalide : utilisation de gemini-2.5-flash.');
+  console.warn('Modèle texte invalide : utilisation de gemini-3.8-flash.');
 }
 
 if (imageModelEnv && imageModelEnv !== GEMINI_IMAGE_MODEL) {
-  console.warn('Modèle image invalide : utilisation de gemini-2.5-flash-image.');
+  console.warn('Modèle image invalide : utilisation de gemini-3.8-flash-image.');
 }
 
 function dateMillis(value) {
