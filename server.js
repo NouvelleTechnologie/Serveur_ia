@@ -297,12 +297,13 @@ app.post(
         `Détails confirmés : ${String(details ?? 'aucun').slice(0, 1200)}`
       ].join('\n');
 
-      const result = await gemini.models.generateContent({
-        model: GEMINI_TEXT_MODEL,
-        contents: prompt
-      });
+      
+const result = await gemini.interactions.create({
+  model: GEMINI_TEXT_MODEL,
+  input: prompt
+});
 
-      const description = String(result.text || '').trim();
+const description = String(result.output_text || '').trim();
 
       if (!description) {
         return res.status(502).json({
