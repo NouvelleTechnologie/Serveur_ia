@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: digicom-ai-server
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        value: digicom-togo-6d3ea
+      - key: FIRESTORE_DATABASE_ID
+        value: default
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_TEXT_MODEL
+        value: gemini-2.5-flash
+      - key: GEMINI_TEXT_FALLBACK_MODELS
+        value: gemini-2.5-flash,gemini-2.5-flash-lite
+      - key: GEMINI_IMAGE_MODEL
+        value: gemini-2.5-flash-image
+      - key: ANTHROPIC_API_KEY
+        sync: false
